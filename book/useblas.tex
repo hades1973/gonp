@@ -1,0 +1,283 @@
+
+\documentclass[a6paper,titlepage,landscape,oneside,12pt]{book}
+\usepackage[cap,UTF8,winfonts]{ctex}
+\usepackage[margin=2mm,bottom=2mm,nohead]{geometry}
+
+\usepackage{fancyhdr}
+\pagestyle{empty}
+
+\usepackage{graphicx}
+\usepackage{listings}
+
+\title{源码阅读}
+\author{Fujohn Bai}
+
+\begin{document}
+\maketitle
+
+\lstset{
+	tabsize=2,
+%	basicstyle=\Large,
+	breaklines=true
+}
+
+\chapter{main.go}
+
+\begin{lstlisting}
+package main
+
+import (
+	"fmt"
+	"gonp/blas"
+)
+
+var data []float64 = []float64{
+	1, 1, 1, 6,
+	0, 4, -1, 5,
+	2, -2, 1, 1,
+}
+
+func prtData() {
+	var g = func(i, j int) float64 {
+		return data[i*4+j]
+	}
+	for i := 0; i < 3; i++ {
+		for j := 0; j < 4; j++ {
+			fmt.Printf("%6.1f", g(i, j))
+
+		}
+		fmt.Println()
+	}
+}
+
+func main() {
+	fmt.Println("vim-go")
+	fmt.Println("Raw Majorx:")
+	prtData()
+
+	r_1 := blas.Vector{
+		N:    4,
+		Inc:  1,
+		Off:  0,
+		Base: data,
+	}
+	r_2 := blas.Vector{
+		N:    4,
+		Inc:  1,
+		Off:  4,
+		Base: data,
+	}
+	r_3 := blas.Vector{
+		N:    4,
+		Inc:  1,
+		Off:  8,
+		Base: data,
+	}
+
+	fmt.Println("(-2) x r_1 + r_3 -> r_3")
+	alpha := -2.0
+	blas.Daxpy(alpha, r_1, r_3)
+	prtData()
+
+	fmt.Println("r_2 + r_3 -> r_3")
+	alpha = 1.0
+	blas.Daxpy(alpha, r_2, r_3)
+	prtData()
+
+	fmt.Println("r_2 <-> r_3")
+	blas.Dswap(r_2, r_3)
+	prtData()
+
+	fmt.Println("r_2 \\dot r_3")
+	dot := blas.Ddot(r_2, r_3)
+	fmt.Println(dot)
+}
+
+
+\end{lstlisting}
+
+\chapter{gemvmain.go}
+
+\begin{lstlisting}
+package main
+
+import (
+	"fmt"
+	"gonp/blas"
+)
+
+func main() {
+	// 此种方式存储，不能使用转置参数
+	// |     A     |  x  | b |
+	// -----------------------
+	// |10, -7, 0, |  0, | 0,|
+	// |-3, +2, 6, | -1, | 0,|
+	// | 5, -1, 5, |  1, | 0,|
+	// -----------------------
+	var Axb = blas.GeMatrix{
+		M: 3, N: 5, LD: 5,
+		OffRow: 0, OffCol: 0,
+		Base: []float64{
+			10, -7, 0, 0, 0,
+			-3, +2, 6, -1, 0,
+			+5, -1, 5, 1, 0,
+		},
+	}
+
+	A := Axb
+	A.N = 3
+	fmt.Println("Matrix Axb")
+	prtM(&Axb)
+	fmt.Println()
+	fmt.Println("Matrix A:")
+	prtM(&A)
+
+	x := Axb.Col(3)
+	b := Axb.Col(4)
+	blas.Dgemv(blas.NoTrans, 1.0, &A, x, 0, b)
+
+	fmt.Println("After call Degmv, Matrix Axb")
+	prtM(&Axb)
+
+	// |   A          | x   | b |
+	// -----------------------
+	//     B
+	// =========
+	// |10, -7,||   0,   0, | 7,|
+	//            ===========
+	// |-3, +2,|| ||6,  -1, || 4,|
+	// =========  ||
+	// | 5, -1,   ||5,   1, || 6,|
+	//            ===========
+	//                C
+	// -----------------------
+	B := Axb
+	B.M, B.N = 2, 2
+	C := Axb
+	C.M, C.N = 2, 2
+	C.OffRow, C.OffCol = 1, 2
+	D := blas.GeMatrix{
+		M: 2, N: 2, LD: 2,
+		OffRow: 0, OffCol: 0,
+		Base: []float64{
+			0., 0.,
+			0., 0.,
+		},
+	}
+	blas.Dgemm(blas.NoTrans, blas.Trans, 1.0, &B, &C, 0.0, &D)
+	fmt.Println("--------------")
+	prtM(&B)
+	fmt.Println("--------------")
+	prtM(&C)
+	fmt.Println("--------------")
+	prtM(&D)
+	fmt.Println("--------------")
+
+}
+
+func prtM(A *blas.GeMatrix) {
+	for i := 0; i < A.M; i++ {
+		for j := 0; j < A.N; j++ {
+			fmt.Printf("%6.1f", A.At(i, j))
+		}
+		fmt.Println()
+	}
+}
+
+
+\end{lstlisting}
+
+\chapter{gemmmain.go}
+
+\begin{lstlisting}
+package main
+
+import (
+	"fmt"
+	"gonp/blas"
+)
+
+func main() {
+	// |     A     |    B      |
+	// -----------------------
+	// | 1, -2, 0, | 0,  0,  0,
+	// |-1, +2, 1, | 0,  0,  0,
+	// | 5, -1, 5, | 0,  0,  0,
+	// | 0,  0, 0, | 3, -1,  0,
+	// | 0,  0, 0, | 2,  0, -1,
+	// | 0,  0, 0, | 1, -1,  1
+	// -----------------------
+	var AB = blas.GeMatrix{
+		M: 6, N: 6, LD: 6,
+		OffRow: 0, OffCol: 0,
+		Base: []float64{
+			1, -2, 0, 0, 0, 0,
+			1, +2, 1, 0, 0, 0,
+			5, -1, 5, 0, 0, 0,
+			0, 0, 0, 3, -1, 0,
+			0, 0, 0, 2, 0, -1,
+			0, 0, 0, 1, -1, 1,
+		},
+	}
+	fmt.Println("Matrix A | B")
+	prtM(&AB)
+	fmt.Println()
+
+	A := AB
+	A.M, A.N = 3, 3
+	fmt.Println("A = ")
+	prtM(&A)
+	fmt.Println()
+
+	B := AB
+	B.M, B.N = 3, 3
+	B.OffRow, B.OffCol = 3, 3
+	fmt.Println("B = ")
+	prtM(&B)
+	fmt.Println()
+
+	C := blas.GeMatrix{
+		M: 3, N: 3, LD: 3,
+		OffRow: 0, OffCol: 0,
+		Base: []float64{
+			0, 0, 0,
+			0, 0, 0,
+			0, 0, 0,
+		},
+	}
+
+	blas.Dgemm(blas.NoTrans, blas.Trans, 1.0, &A, &B, 0.0, &C)
+	fmt.Println("C = ")
+	prtM(&C)
+	fmt.Println()
+
+	A.M, A.N = 2, 2
+	B.M, B.N = 2, 2
+	B.OffRow, B.OffCol = 1, 1
+	fmt.Println("A = ")
+	prtM(&A)
+	fmt.Println()
+	fmt.Println("B = ")
+	prtM(&B)
+	fmt.Println()
+	blas.Dgemm(blas.NoTrans, blas.Trans, 1.0, &A, &B, 0.0, &C)
+	fmt.Println("C = ")
+	prtM(&C)
+	fmt.Println()
+}
+
+func prtM(A *blas.GeMatrix) {
+	for i := 0; i < A.M; i++ {
+		for j := 0; j < A.N; j++ {
+			fmt.Printf("%6.1f", A.At(i, j))
+		}
+		fmt.Println()
+	}
+}
+
+
+\end{lstlisting}
+
+
+\end{document}
+

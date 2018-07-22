@@ -1,0 +1,365 @@
+
+\documentclass[a5paper,titlepage,landscape,oneside,12pt]{book}
+\usepackage[cap,UTF8,winfonts]{ctex}
+\usepackage[margin=2mm,bottom=2mm,nohead]{geometry}
+
+\usepackage{fancyhdr}
+\pagestyle{empty}
+
+\usepackage{graphicx}
+\usepackage{listings}
+
+\title{源码阅读}
+\author{Fujohn Bai}
+
+\begin{document}
+\maketitle
+
+\lstset{
+	tabsize=2,
+%	basicstyle=\Large,
+	breaklines=true
+}
+
+\chapter{const.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+
+const (
+	RowMajor    int = 101
+	ColMajor    int = 102
+	NoTrans     int = 111
+	Trans       int = 112
+	ConjTrans   int = 113
+	ConjNoTrans int = 114
+	Upper       int = 121
+	Lower       int = 122
+	NonUnit     int = 131
+	Unit        int = 132
+	Left        int = 141
+	Right       int = 142
+)
+
+
+\end{lstlisting}
+
+\chapter{vector.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+
+// Vector represents a vector with an associated element increment.
+type Vector struct {
+	N    int // N elements
+	Inc  int // from v[i] to v[i+1] need step Inc elements
+	Off  int // first element is Base[Off:]
+	Base []float64
+}
+
+// At return v[i]
+func (v *Vector) At(i int) float64 {
+	return v.Base[v.Off+i*v.Inc]
+}
+
+// Set assign val to v[i], and return v[i]
+func (v *Vector) Set(i int, val float64) float64 {
+	v.Base[v.Off+i*v.Inc] = val
+	return val
+}
+
+
+\end{lstlisting}
+
+\chapter{matrix.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+
+// Gematrix represents a general matrix using the conventional storage scheme.
+type GeMatrix struct {
+	M, N           int // M x N elements, M is rows, N is cols
+	LD             int // from A[i,j] to A[i+1, j] nees step LD elements
+	OffRow, OffCol int // first element is Base[OffRow * LD + OffCol]
+	Base           []float64
+}
+
+// At return A[i, j]
+func (A *GeMatrix) At(i, j int) float64 {
+	return A.Base[(i+A.OffRow)*A.LD+(j+A.OffCol)]
+}
+
+// Set set A[i, j] to val, and return val
+func (A *GeMatrix) Set(i, j int, val float64) float64 {
+	A.Base[(i+A.OffRow)*A.LD+(j+A.OffCol)] = val
+	return val
+}
+
+// Row return ith row vector of A.
+// Any modify element in vector will affect A,
+// for vector and A own same memory block
+func (A *GeMatrix) Row(i int) *Vector {
+	return &Vector{
+		N:    A.N,
+		Inc:  1,
+		Off:  (i+A.OffRow)*A.LD + A.OffCol,
+		Base: A.Base,
+	}
+}
+
+// Col return ith col vector of A.
+// Any modify element in vector will affect A,
+// for vector and A own same memory block
+func (A *GeMatrix) Col(j int) *Vector {
+	return &Vector{
+		N:    A.M,
+		Inc:  A.LD,
+		Off:  A.OffRow*A.LD + A.OffCol + j,
+		Base: A.Base,
+	}
+}
+
+// Band represents a band matrix using the band storage scheme.
+type Band struct {
+	Rows, Cols int
+	KL, KU     int
+	LD         int
+	Data       []float64
+}
+
+// Triangular represents a triangular matrix using the conventional storage scheme.
+type Triangular struct {
+	N    int
+	LD   int
+	Data []float64
+	//	Uplo blas.Uplo
+	//	Diag blas.Diag
+}
+
+// TriangularBand represents a triangular matrix using the band storage scheme.
+type TriangularBand struct {
+	N, K int
+	LD   int
+	Data []float64
+	//	Uplo blas.Uplo
+	//	Diag blas.Diag
+}
+
+// TriangularPacked represents a triangular matrix using the packed storage scheme.
+type TriangularPacked struct {
+	N    int
+	Data []float64
+	//	Uplo blas.Uplo
+	//	Diag blas.Diag
+}
+
+// Symmetric represents a symmetric matrix using the conventional storage scheme.
+type Symmetric struct {
+	N    int
+	LD   int
+	Data []float64
+	//	Uplo blas.Uplo
+}
+
+// SymmetricBand represents a symmetric matrix using the band storage scheme.
+type SymmetricBand struct {
+	N, K int
+	LD   int
+	Data []float64
+	//	Uplo blas.Uplo
+}
+
+// SymmetricPacked represents a symmetric matrix using the packed storage scheme.
+type SymmetricPacked struct {
+	N    int
+	Data []float64
+	//	Uplo blas.Uplo
+}
+
+
+\end{lstlisting}
+
+\chapter{blaslevel1.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+import (
+	"unsafe"
+)
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+
+////////////////////////////////////////////
+//
+// blas level 1 api
+//
+////////////////////////////////////////////
+
+// Ddot: dot <- x^T \times y
+func Ddot(x, y Vector) float64 {
+	var dot C.double
+	dot = C.cblas_ddot(
+		(C.blasint)(x.N),
+		(*C.double)(unsafe.Pointer(&(x.Base[x.Off]))), (C.blasint)(x.Inc),
+		(*C.double)(unsafe.Pointer(&(y.Base[y.Off]))), (C.blasint)(y.Inc),
+	)
+
+	return float64(dot)
+}
+
+// Daxpy: y <- alpha \times x + y
+func Daxpy(alpha float64, x, y Vector) {
+	C.cblas_daxpy(
+		(C.blasint)(x.N),
+		(C.double)(alpha),
+		(*C.double)(unsafe.Pointer(&(x.Base[x.Off]))), (C.blasint)(x.Inc),
+		(*C.double)(unsafe.Pointer(&(y.Base[y.Off]))), (C.blasint)(y.Inc),
+	)
+}
+
+// Dscal: x <- alpha \times x
+func Dscal(alpha float64, x Vector) {
+	C.cblas_dscal(
+		(C.blasint)(x.N),
+		(C.double)(alpha),
+		(*C.double)(unsafe.Pointer(&(x.Base[x.Off]))), (C.blasint)(x.Inc),
+	)
+}
+
+// Dswap: x <-> y
+func Dswap(x, y Vector) {
+	C.cblas_dswap(
+		C.blasint(x.N),
+		(*C.double)(unsafe.Pointer(&(x.Base[x.Off]))), (C.blasint)(x.Inc),
+		(*C.double)(unsafe.Pointer(&(y.Base[y.Off]))), (C.blasint)(y.Inc),
+	)
+}
+
+
+\end{lstlisting}
+
+\chapter{blaslevel2.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+import "unsafe"
+
+////////////////////////////////////////////
+//
+// blas level 2 api
+//
+////////////////////////////////////////////
+
+func Dgemv(trans int, alpha float64, A *GeMatrix, x *Vector, beta float64, y *Vector) {
+	C.cblas_dgemv(
+		C.enum_CBLAS_ORDER(RowMajor),
+		C.enum_CBLAS_TRANSPOSE(trans),
+		C.blasint(A.M), C.blasint(A.N),
+		C.double(alpha),
+		(*C.double)(unsafe.Pointer(&A.Base[A.OffRow*A.LD+A.OffCol])),
+		C.blasint(A.LD),
+		(*C.double)(unsafe.Pointer(&x.Base[x.Off])),
+		C.blasint(x.Inc),
+		C.double(beta),
+		(*C.double)(unsafe.Pointer(&y.Base[y.Off])),
+		C.blasint(y.Inc),
+	)
+}
+
+
+\end{lstlisting}
+
+\chapter{blaslevel3.go}
+
+\begin{lstlisting}
+// Package blas provides a interface for blas
+// go install .
+package blas
+
+/*
+#cgo CFLAGS: -I/home/gns/thirdparty/include
+#cgo LDFLAGS: -L/home/gns/thirdparty/lib -lopenblas
+
+#include <cblas.h>
+*/
+import "C"
+import "unsafe"
+
+////////////////////////////////////////////
+//
+// blas level 3 api
+//
+////////////////////////////////////////////
+
+func Dgemm(transA, transB int, alpha float64, A *GeMatrix, B *GeMatrix, beta float64, CC *GeMatrix) {
+	C.cblas_dgemm(
+		C.enum_CBLAS_ORDER(RowMajor),
+		C.enum_CBLAS_TRANSPOSE(transA),
+		C.enum_CBLAS_TRANSPOSE(transB),
+		C.blasint(A.M), C.blasint(A.N), C.blasint(B.N),
+		C.double(alpha),
+		(*C.double)(unsafe.Pointer(&A.Base[A.OffRow*A.LD+A.OffCol])),
+		C.blasint(A.LD),
+		(*C.double)(unsafe.Pointer(&B.Base[B.OffRow*B.LD+B.OffCol])),
+		C.blasint(B.LD),
+		C.double(beta),
+		(*C.double)(unsafe.Pointer(&CC.Base[CC.OffRow*CC.LD+CC.OffCol])),
+		C.blasint(CC.LD),
+	)
+}
+
+
+\end{lstlisting}
+
+
+\end{document}
+
